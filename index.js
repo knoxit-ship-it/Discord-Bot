@@ -15,7 +15,7 @@ const { parse } = require('csv-parse/sync');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 
-const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/15ob2eDEYiu8VA8wUkYEQU0xA6Z3ywnPvSEVixWXEfao/edit#gid=1587560849';
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/15ob2eDEYiu8VA8wUkYEQU0xA6Z3ywnPvSEVixWXEfao/export?format=csv&gid=1587560849';
 
 const DIAMOND_TIERS = [
   { value: 100000, name: 'Tier 2' },
