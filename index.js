@@ -15,7 +15,7 @@ const { parse } = require('csv-parse/sync');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 
-const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/15ob2eDEYiu8VA8wUkYEQU0xA6Z3ywnPvSEVixWXEfao/export?format=csv&gid=1587560849';
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/15ob2eDEYiu8VA8wUkYEQU0xA6Z3ywnPvSEVixWXEfao/edit#gid=1587560849';
 
 const DIAMOND_TIERS = [
   { value: 100000, name: 'Tier 2' },
@@ -37,7 +37,6 @@ function cleanNumber(value) {
 function createProgressBar(percent, size = 10) {
   const filled = Math.round((percent / 100) * size);
   const empty = size - filled;
-
   return '🟩'.repeat(filled) + '⬜'.repeat(empty);
 }
 
@@ -117,7 +116,8 @@ function getLiveProgress(days, hours) {
   };
 }
 
-async function getUserData(username) {
+// 🔐 NEW: Lookup by Discord ID
+async function getUserDataById(discordId) {
   const res = await axios.get(SHEET_CSV_URL);
 
   const records = parse(res.data, {
@@ -126,10 +126,8 @@ async function getUserData(username) {
     trim: true,
   });
 
-  const searchName = username.trim().toLowerCase();
-
   for (const row of records) {
-    if (row.username && row.username.trim().toLowerCase() === searchName) {
+    if (row.discord_id && row.discord_id.trim() === discordId) {
       return row;
     }
   }
@@ -139,7 +137,6 @@ async function getUserData(username) {
 
 function createUserEmbed(name, result) {
   const diamonds = cleanNumber(result['total diamonds']);
-
   const tierProgress = getTierProgress(diamonds);
 
   const live = getLiveProgress(
@@ -151,57 +148,30 @@ function createUserEmbed(name, result) {
     .setTitle(`👤 ${name}`)
     .setColor(live.color)
     .addFields(
-      {
-        name: 'Tier Status',
-        value: result['tier status'] || 'N/A',
-        inline: false,
-      },
-
+      { name: 'Tier Status', value: result['tier status'] || 'N/A' },
       {
         name: '📊 Live Progress',
         value:
           `\`\`\`\nDays  : ${live.daysBar} ${live.daysPercent}%\nHours : ${live.hoursBar} ${live.hoursPercent}%\n\n${live.text}\n${live.statusLine}\`\`\``,
-        inline: false,
       },
-
-      {
-        name: '📅 Live Days',
-        value: `\`\`\`${result['valid go live days'] || '0'}\`\`\``,
-        inline: true,
-      },
-      {
-        name: '⏱️ Live Hours',
-        value: `\`\`\`${result['valid go live hrs'] || '0'}\`\`\``,
-        inline: true,
-      },
-
+      { name: '📅 Live Days', value: `\`\`\`${result['valid go live days'] || '0'}\`\`\``, inline: true },
+      { name: '⏱️ Live Hours', value: `\`\`\`${result['valid go live hrs'] || '0'}\`\`\``, inline: true },
       { name: '\u200B', value: '\u200B', inline: true },
-
-      {
-        name: '💎 Diamonds',
-        value: diamonds.toLocaleString(),
-        inline: true,
-      },
-      {
-        name: '🎁 Reward',
-        value: result['reward'] || 'N/A',
-        inline: true,
-      },
-
+      { name: '💎 Diamonds', value: diamonds.toLocaleString(), inline: true },
+      { name: '🎁 Reward', value: result['reward'] || 'N/A', inline: true },
       {
         name: '⬆️ Next Tier Progress',
         value: `\`\`\`${tierProgress.bar} ${tierProgress.percent}%\n${tierProgress.text}\`\`\``,
-        inline: false,
       }
     )
     .setFooter({ text: 'User Lookup System' })
     .setTimestamp();
 }
 
-function createRefreshButton(name) {
+function createRefreshButton(discordId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`refresh_${name}`)
+      .setCustomId(`refresh_${discordId}`)
       .setLabel('Refresh')
       .setEmoji('🔄')
       .setStyle(ButtonStyle.Primary)
@@ -213,30 +183,35 @@ client.once(Events.ClientReady, readyClient => {
 });
 
 client.on(Events.InteractionCreate, async interaction => {
+  // 🔍 Slash command
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName !== 'username') return;
 
     await interaction.deferReply({ ephemeral: true });
 
-    const name = interaction.options.getString('name');
+    const discordId = interaction.user.id;
+    const name = interaction.user.username;
 
     let result;
 
     try {
-      result = await getUserData(name);
+      result = await getUserDataById(discordId);
     } catch (error) {
       console.error('Google Sheet error:', error);
       await interaction.editReply('❌ I could not read the Google Sheet.');
       return;
     }
 
+    // ❗ FALLBACK
     if (!result) {
-      await interaction.editReply(`No result found for **${name}**.`);
+      await interaction.editReply(
+        `❌ Your account is not linked.\n\nSend this ID to an admin:\n\`${discordId}\``
+      );
       return;
     }
 
     const embed = createUserEmbed(name, result);
-    const row = createRefreshButton(name);
+    const row = createRefreshButton(discordId);
 
     try {
       await interaction.user.send({
@@ -246,30 +221,37 @@ client.on(Events.InteractionCreate, async interaction => {
 
       await interaction.editReply('📩 I sent you a DM!');
     } catch (error) {
-      console.error('DM error:', error);
-
       await interaction.editReply({
-        content: '❌ I could not send you a DM. Here is your result instead:',
+        content: '❌ Could not DM you, showing here:',
         embeds: [embed],
         components: [row],
       });
     }
   }
 
+  // 🔄 Refresh button
   if (interaction.isButton()) {
     if (!interaction.customId.startsWith('refresh_')) return;
 
-    const name = interaction.customId.replace('refresh_', '');
+    const discordId = interaction.customId.replace('refresh_', '');
+
+    // 🔐 Prevent other users clicking
+    if (interaction.user.id !== discordId) {
+      await interaction.reply({
+        content: '❌ This button is not for you.',
+        ephemeral: true
+      });
+      return;
+    }
 
     await interaction.deferUpdate();
 
     try {
-      const result = await getUserData(name);
-
+      const result = await getUserDataById(discordId);
       if (!result) return;
 
-      const embed = createUserEmbed(name, result);
-      const row = createRefreshButton(name);
+      const embed = createUserEmbed(interaction.user.username, result);
+      const row = createRefreshButton(discordId);
 
       await interaction.editReply({
         embeds: [embed],
