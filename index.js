@@ -17,6 +17,17 @@ const TOKEN = process.env.DISCORD_TOKEN;
 
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/15ob2eDEYiu8VA8wUkYEQU0xA6Z3ywnPvSEVixWXEfao/export?format=csv&gid=1587560849';
 
+function logEvent(type, data = {}) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    type,
+    ...data
+  };
+
+  // Railway captures this in the Logs tab
+  console.log(JSON.stringify(entry));
+}
+
 const DIAMOND_TIERS = [
   { value: 100000, name: 'Tier 2' },
   { value: 200000, name: 'Tier 3' },
@@ -116,7 +127,6 @@ function getLiveProgress(days, hours) {
   };
 }
 
-// 🔐 NEW: Lookup by Discord ID
 async function getUserDataById(discordId) {
   const res = await axios.get(SHEET_CSV_URL);
 
@@ -180,11 +190,24 @@ function createRefreshButton(discordId) {
 
 client.once(Events.ClientReady, readyClient => {
   console.log(`Logged in as ${readyClient.user.tag}`);
+
+  logEvent('bot_ready', {
+    bot_tag: readyClient.user.tag,
+    bot_id: readyClient.user.id
+  });
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-  // 🔍 Slash command
   if (interaction.isChatInputCommand()) {
+    logEvent('command_used', {
+      command: interaction.commandName,
+      user_id: interaction.user.id,
+      username: interaction.user.username,
+      user_tag: interaction.user.tag,
+      guild_id: interaction.guildId || null,
+      channel_id: interaction.channelId || null
+    });
+
     if (interaction.commandName !== 'username') return;
 
     await interaction.deferReply({ ephemeral: true });
@@ -196,14 +219,32 @@ client.on(Events.InteractionCreate, async interaction => {
 
     try {
       result = await getUserDataById(discordId);
+
+      logEvent('lookup_result', {
+        user_id: discordId,
+        username: name,
+        found: Boolean(result)
+      });
     } catch (error) {
       console.error('Google Sheet error:', error);
+
+      logEvent('error', {
+        area: 'google_sheet_lookup',
+        user_id: discordId,
+        username: name,
+        message: error.message
+      });
+
       await interaction.editReply('❌ I could not read the Google Sheet.');
       return;
     }
 
-    // ❗ FALLBACK
     if (!result) {
+      logEvent('account_not_linked', {
+        user_id: discordId,
+        username: name
+      });
+
       await interaction.editReply(
         `❌ Your account is not linked.\n\nSend this ID to an admin:\n\`${discordId}\``
       );
@@ -219,8 +260,19 @@ client.on(Events.InteractionCreate, async interaction => {
         components: [row],
       });
 
+      logEvent('dm_sent', {
+        user_id: discordId,
+        username: name
+      });
+
       await interaction.editReply('📩 I sent you a DM!');
     } catch (error) {
+      logEvent('dm_failed_showing_here', {
+        user_id: discordId,
+        username: name,
+        message: error.message
+      });
+
       await interaction.editReply({
         content: '❌ Could not DM you, showing here:',
         embeds: [embed],
@@ -229,14 +281,27 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 
-  // 🔄 Refresh button
   if (interaction.isButton()) {
+    logEvent('button_clicked', {
+      custom_id: interaction.customId,
+      user_id: interaction.user.id,
+      username: interaction.user.username,
+      user_tag: interaction.user.tag,
+      guild_id: interaction.guildId || null,
+      channel_id: interaction.channelId || null
+    });
+
     if (!interaction.customId.startsWith('refresh_')) return;
 
     const discordId = interaction.customId.replace('refresh_', '');
 
-    // 🔐 Prevent other users clicking
     if (interaction.user.id !== discordId) {
+      logEvent('unauthorized_refresh_click', {
+        button_owner_id: discordId,
+        clicked_by_id: interaction.user.id,
+        clicked_by_username: interaction.user.username
+      });
+
       await interaction.reply({
         content: '❌ This button is not for you.',
         ephemeral: true
@@ -248,6 +313,13 @@ client.on(Events.InteractionCreate, async interaction => {
 
     try {
       const result = await getUserDataById(discordId);
+
+      logEvent('refresh_lookup_result', {
+        user_id: discordId,
+        username: interaction.user.username,
+        found: Boolean(result)
+      });
+
       if (!result) return;
 
       const embed = createUserEmbed(interaction.user.username, result);
@@ -257,8 +329,20 @@ client.on(Events.InteractionCreate, async interaction => {
         embeds: [embed],
         components: [row],
       });
+
+      logEvent('refresh_success', {
+        user_id: discordId,
+        username: interaction.user.username
+      });
     } catch (error) {
       console.error('Refresh error:', error);
+
+      logEvent('error', {
+        area: 'refresh_button',
+        user_id: discordId,
+        username: interaction.user.username,
+        message: error.message
+      });
     }
   }
 });
