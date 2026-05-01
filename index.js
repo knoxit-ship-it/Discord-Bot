@@ -168,7 +168,7 @@ function createUserEmbed(name, result) {
       { name: '⏱️ Live Hours', value: `\`\`\`${result['valid go live hrs'] || '0'}\`\`\``, inline: true },
       { name: '\u200B', value: '\u200B', inline: true },
       { name: '💎 Diamonds', value: diamonds.toLocaleString(), inline: true },
-      { name: '🎁 Activeness Reward in USD $', value: result['reward'] || 'N/A', inline: true },
+      { name: '🎁 Activeness Reward in USD', value: result['reward'] || 'N/A', inline: true },
       {
         name: '⬆️ Next Tier Progress',
         value: `\`\`\`${tierProgress.bar} ${tierProgress.percent}%\n${tierProgress.text}\`\`\``,
